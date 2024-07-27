@@ -1,0 +1,87 @@
+---
+# This action is centrally managed in https://github.com/<organization>/.github/
+# Don't make changes to this file in this repo as they will be overwritten with changes made to the same file in
+# the above-mentioned repo.
+
+# Manage stale issues and PRs.
+
+# This is borrowed from @LizardByte/.github
+
+name: Stale Issues / PRs
+
+on:
+  schedule:
+    - cron: '00 10 * * *'
+  workflow_dispatch:
+
+jobs:
+  setup-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.result }}
+    steps:
+      # get all repos in this org
+      - name: Get repos
+        id: set-matrix
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const opts = github.rest.repos.listForOrg.endpoint.merge({ org: context.repo.owner });
+            const repos = await github.paginate(opts)
+
+            // create a GitHub strategy matrix
+            let matrix = { "include": [] };
+            for (const repo of repos) {
+              matrix.include.push({ "repo": repo.name });
+            }
+            return matrix
+
+  test-matrix:
+    if: github.event_name == 'workflow_dispatch'
+    name: Test Matrix - ${{ matrix.repo }}
+    needs: setup-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.matrix) }}
+    steps:
+      - name: Test Matrix
+        run: echo ${{ matrix.repo }}
+
+  stale:
+    if: github.event_name == 'schedule'
+    name: Check Stale Issues / PRs
+    needs: setup-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.matrix) }}
+      max-parallel: 1  # run one at a time to attempt to avoid GitHub api rate limits
+    steps:
+      - name: Stale
+        # TODO: use official action after https://github.com/actions/stale/pull/1081 is merged
+        # uses: actions/stale@v9
+        uses: amenocal/stale@44df11e9a0d1acc948e6c4c610ca486edeb1b16a
+        with:
+          close-issue-message: >
+            This issue was closed because it has been stalled for 10 days with no activity.
+          close-pr-message: >
+            This PR was closed because it has been stalled for 10 days with no activity.
+          days-before-stale: 90
+          days-before-close: 10
+          exempt-all-assignees: true
+          exempt-pr-labels: 'dependencies,l10n'
+          repo-owner: ${{ github.repository_owner }}
+          repo-name: ${{ matrix.repo }}
+          stale-issue-label: 'stale'
+          stale-issue-message: >
+            It seems this issue hasn't had any activity in the past 90 days.
+            If it's still something you'd like addressed, please let us know by leaving a comment.
+            Otherwise, to help keep our backlog tidy, we'll be closing this issue in 10 days. Thanks!
+          stale-pr-label: 'stale'
+          stale-pr-message: >
+            It looks like this PR has been idle for 90 days.
+            If it's still something you're working on or would like to pursue,
+            please leave a comment or update your branch.
+            Otherwise, we'll be closing this PR in 10 days to reduce our backlog. Thanks!
+          repo-token: ${{ secrets.GH_BOT_TOKEN }}
